@@ -1,0 +1,8 @@
+{
+  "name": "claude-status-light-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test __tests__/*.test.mjs"
+  }
+}
