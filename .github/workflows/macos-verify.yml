@@ -1,0 +1,58 @@
+name: macOS Verify
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  verify-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Run production build
+        run: npm run build
+
+      - name: Build unsigned macOS app and DMG
+        run: npm run tauri:build:mac -- --no-sign
+
+      - name: Upload macOS app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-status-light-macos-app
+          path: src-tauri/target/release/bundle/macos/*.app
+          if-no-files-found: error
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-status-light-macos-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

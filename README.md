@@ -331,6 +331,9 @@ Expected result:
 
 ## macOS Verification Checklist
 
+- GitHub Actions `macOS Verify` workflow passes on `macos-latest`
+- the workflow runs `npm test`, `npm run build`, and `npm run tauri:build:mac -- --no-sign`
+- the workflow uploads unsigned `.app` and `.dmg` artifacts for inspection
 - prerequisites installed: `xcode-select --install`, Rust, Node.js
 - `npm run tauri:dev` launches a native macOS window
 - tray icon appears in the macOS menu bar area

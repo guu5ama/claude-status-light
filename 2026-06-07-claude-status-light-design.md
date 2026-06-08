@@ -617,7 +617,8 @@ Implemented as of this design sync:
 Known current limitation:
 
 - Windows behavior has been validated directly
-- macOS remains a required target, but still needs real native validation before being treated as confirmed-shipping
+- macOS now has a GitHub Actions verification path that runs frontend tests, production build, and unsigned `.app/.dmg` packaging on `macos-latest`
+- macOS still needs direct native validation for tray behavior, transparent window behavior, drag behavior, and local audio before being treated as confirmed-shipping
 
 ## Next Step
 
