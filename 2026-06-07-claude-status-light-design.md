@@ -603,7 +603,7 @@ Implemented as of this design sync:
 - Floating traffic-light UI in `src/components/StatusLight.tsx`
 - State polling and sound control in `src/App.tsx` and `src/hooks/`
 - Tauri tray and window shell in `src-tauri/`
-- Root usage guide in `README.md`
+- Root usage guide in `README.md`, now rewritten in a product-first GitHub style instead of a handoff-log style
 - `AskUserQuestion` pending-user detection is handled before `Stop`, so plan-mode user questions no longer leave the light stuck on yellow
 - Release scripts now include `tauri:build:windows` and `tauri:build:mac`
 - A Windows release build has been generated successfully as `.exe` and `.msi`
