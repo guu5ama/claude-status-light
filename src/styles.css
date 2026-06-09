@@ -16,7 +16,7 @@ body {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   overflow: hidden;
   box-sizing: border-box;
@@ -30,10 +30,11 @@ body {
 .app-scale-frame {
   display: grid;
   place-items: center;
+  align-content: start;
   gap: 8px;
-  padding: 10px 4px 14px;
+  padding: 10px 4px 8px;
   box-sizing: border-box;
-  transform-origin: center center;
+  transform-origin: top center;
   will-change: transform;
 }
 
@@ -195,14 +196,19 @@ body {
 }
 
 .status-label {
-  color: rgba(232, 235, 239, 0.72);
+  color: rgba(247, 250, 252, 0.98);
   font-size: 9px;
   line-height: 1.1;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   padding: 0 4px;
   white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 .sound-toggle {
@@ -224,6 +230,23 @@ body {
 
 .sound-toggle--bottom {
   position: static;
+}
+
+.app-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.details-toggle__icon {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.22s ease;
+}
+
+.sound-toggle[aria-expanded='true'] .details-toggle__icon {
+  transform: rotate(180deg);
 }
 
 .sound-toggle:hover {
@@ -278,6 +301,98 @@ body {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.usage-panel {
+  width: 104px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-start;
+  margin: 12px 0 4px;
+}
+
+.usage-dial {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.usage-dial__label {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(247, 250, 252, 0.98);
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+.usage-dial__ring {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+}
+
+.usage-dial__svg {
+  position: absolute;
+  inset: 0;
+  width: 40px;
+  height: 40px;
+}
+
+.usage-dial__track {
+  fill: none;
+  stroke: rgba(120, 126, 136, 0.45);
+  stroke-width: 6;
+}
+
+.usage-dial__arc {
+  fill: none;
+  stroke: #f5a623;
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.usage-dial__arc--hot {
+  stroke: #ff7a18;
+}
+
+.usage-dial__pct {
+  position: relative;
+  font-family: "Consolas", "SF Mono", "Menlo", monospace;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  color: #f5a623;
+  -webkit-text-stroke: 0.5px #f5a623;
+}
+
+.usage-dial__pct--hot {
+  color: #ff7a18;
+  -webkit-text-stroke: 0.5px #ff7a18;
+}
+
+.usage-dial__reset {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: rgba(247, 250, 252, 0.95);
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 @keyframes pulse-red {

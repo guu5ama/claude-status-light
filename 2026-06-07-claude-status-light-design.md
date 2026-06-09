@@ -371,8 +371,50 @@ Implemented UI notes:
 - The content scales proportionally to avoid scrollbars or clipping on different displays
 - The old bottom support post has been removed from the signal body
 - The old top cap bar has also been removed, leaving a cleaner single-body silhouette
-- The speaker button now sits below the status area instead of on the right side, so the UI keeps a narrow footprint
+- The bottom controls row holds two icon buttons: a chevron `Show/Hide Details` toggle and the sound mute toggle, so the UI keeps a narrow footprint
 - A setup note can appear below the status label to show automatic configuration success or failure details
+- A usage panel can appear below the status/setup area showing Claude plan usage (see `Claude Usage Display`)
+- Because the window is transparent, the status label and usage text use a dark outline so they stay legible on any desktop wallpaper
+
+## Claude Usage Display
+
+Post-MVP addition. The app shows the same plan-usage information that Claude Code's `/usage` view reports: a 5-hour session window and a 7-day weekly window, each as a circular dial with a relative reset time.
+
+Data source:
+
+- Official Anthropic OAuth endpoint `GET https://api.anthropic.com/api/oauth/usage`
+- Requires `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`
+- The access token is read from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`), the same credentials Claude Code itself uses
+- Response fields consumed: `five_hour.{utilization,resets_at}` and `seven_day.{utilization,resets_at}`; other windows in the response are ignored
+
+Why this differs from the rejected "cloud backend" non-goal:
+
+- The app does not run or depend on its own server; it makes a read-only call to the user's existing Claude account endpoint from the local machine
+- No state is sent anywhere; only usage percentages are read back for display
+
+Architecture:
+
+- Fetch happens in the Tauri Rust backend via a `get_claude_usage` command, not in the bridge and not in the webview
+- The bridge is event-driven by hooks and cannot poll on a timer, so it is the wrong place for periodic usage reads
+- Keeping the call in Rust avoids exposing the OAuth token to the webview and avoids webview CORS restrictions against `api.anthropic.com`
+- The Rust client uses `reqwest` with the `rustls-tls-native-roots` backend: rustls avoids the Windows schannel certificate-revocation failure seen under TLS inspection, while native (OS) root certificates let it trust a corporate/interception CA the same way the system tools do (the bundled webpki roots reject such intercepted certificates, which made requests fail)
+
+Polling and resilience:
+
+- The endpoint rate-limits aggressively, so the frontend polls only every 5 minutes, far less often than the 500ms `state.json` poll
+- On any error (network failure, rate limit, expired token) the last good usage value is kept and no error is surfaced
+- If no usage data has been obtained yet, the panel renders nothing rather than showing a placeholder
+
+UI:
+
+- Two circular dials side by side: each has a small `5H` / `7D` label on top, the percentage in the center, and a `resets in Xh` line below
+- The ring arc and the center percentage are color-coded by utilization: orange-yellow below 80%, orange at 80% and above
+- The dial center is transparent (no filled disc); text uses a dark outline so it stays legible against any desktop wallpaper, since the window is transparent and the text sits directly on the desktop
+- The panel keeps the narrow window footprint; the window is sized to the steady-state layout
+
+Current limitation:
+
+- Token refresh is not implemented; when the stored access token expires the panel silently keeps the last value until valid credentials return
 
 ## macOS Packaging Direction
 
@@ -452,9 +494,17 @@ Tray menu:
 
 - Sound On/Off
 - Open/Hide
+- Show/Hide Details
 - Configure Claude Hooks
 - Reconnect Session
 - Quit
+
+Show/Hide Details can be triggered from the tray menu or from an in-window chevron button next to the sound button (both fire the same toggle). It hides the entire area below the traffic light (status label, setup note, and usage panel), leaving just the signal body and the two controls. When hidden, the OS window shrinks to a collapsed height so there is no dead transparent space, and grows back when shown. Two details make this stable:
+
+- A separate collapsed design height keeps the traffic light at full scale in both modes.
+- Content is top-anchored (`align-content: start`) so the traffic light stays at a fixed position and does not jump when toggling; the resize is sequenced with the render (grow window before showing, hide content before shrinking) to avoid a transient scale flash.
+
+The toggle is in-memory and defaults to visible on each launch.
 
 Setup messaging:
 
@@ -601,6 +651,8 @@ Implemented as of this design sync:
 - Session binding logic in `bridge/read-current-state.mjs`
 - Automatic Claude settings merge + backup logic in `src-tauri/src/claude_settings.rs`
 - Floating traffic-light UI in `src/components/StatusLight.tsx`
+- Claude plan-usage dials in `src/components/UsagePanel.tsx`, `src/hooks/useClaudeUsage.ts`, `src/lib/usage.ts`, and the `get_claude_usage` Tauri command in `src-tauri/src/lib.rs` (reqwest with `rustls-tls-native-roots`)
+- Show/Hide Details toggle (tray item + in-window chevron) with sequenced window resize in `src/App.tsx`, the `toggle_details` tray emit in `src-tauri/src/lib.rs`, and the `core:window:allow-set-size` capability
 - State polling and sound control in `src/App.tsx` and `src/hooks/`
 - Tauri tray and window shell in `src-tauri/`
 - Root usage guide in `README.md`, now rewritten in a product-first GitHub style instead of a handoff-log style

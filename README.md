@@ -23,6 +23,7 @@ Claude Code inside VS Code often lives inside a busy editor window. This app mak
 - keep coding or reading on another screen
 - notice immediately when Claude needs input
 - hear a sound when status changes
+- glance at your Claude plan usage (5-hour and weekly windows)
 - run the same idea on Windows and macOS
 
 ## Download
@@ -72,6 +73,22 @@ The underlying hook system is shared Claude Code behavior, so other surfaces may
 
 This means a plain factual answer should turn green even if it does not literally say "done".
 
+## Plan Usage
+
+Below the traffic light, two circular dials mirror the same plan usage shown by Claude Code's `/usage`:
+
+- `5H` = the 5-hour session window
+- `7D` = the 7-day weekly window
+
+Each dial shows the percentage used in the center and `resets in Xh` below. The ring and percentage are orange-yellow below 80% and orange at 80% and above.
+
+How it is fetched:
+
+- the Tauri backend reads your OAuth token from `~/.claude/.credentials.json` (the same credentials Claude Code uses) and calls the official `https://api.anthropic.com/api/oauth/usage` endpoint
+- it is polled at a low frequency (every 5 minutes) because the endpoint rate-limits aggressively
+- on any error the last known values are kept; nothing is ever sent anywhere, usage percentages are only read back for display
+- if the token is expired or no data has been fetched yet, the dials simply do not appear
+
 ## Automatic Hook Setup
 
 On startup, the app tries to manage `~/.claude/settings.json` for you.
@@ -95,11 +112,14 @@ Tray controls:
 
 - `Open/Hide`
 - `Sound On/Off`
+- `Show/Hide Details`
 - `Configure Claude Hooks`
 - `Reconnect Session`
 - `Quit`
 
 `Reconnect Session` resets binding to `idle_unbound` so the next real Claude event can claim the app cleanly.
+
+`Show/Hide Details` (also available as the chevron button in the window) collapses the area below the traffic light and shrinks the window down to just the light and the control buttons.
 
 ## End-User Notes
 

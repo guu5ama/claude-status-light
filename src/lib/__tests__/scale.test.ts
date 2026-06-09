@@ -12,7 +12,7 @@ describe('calculateFitScale', () => {
     expect(
       calculateFitScale({
         viewportWidth: 128,
-        viewportHeight: 432,
+        viewportHeight: 418,
         designWidth: DESIGN_WIDTH,
         designHeight: DESIGN_HEIGHT,
         paddingX: VIEWPORT_PADDING_X,

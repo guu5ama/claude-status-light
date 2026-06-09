@@ -440,6 +440,101 @@ fn reset_session_binding() -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+fn resolve_claude_credentials_path() -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("CLAUDE_STATUS_LIGHT_CLAUDE_CREDENTIALS_PATH") {
+        if !path.trim().is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
+
+    Ok(PathBuf::from(home).join(".claude").join(".credentials.json"))
+}
+
+#[derive(serde::Serialize)]
+struct UsageWindow {
+    utilization: f64,
+    resets_at: String,
+}
+
+#[derive(serde::Serialize)]
+struct ClaudeUsage {
+    five_hour: Option<UsageWindow>,
+    seven_day: Option<UsageWindow>,
+}
+
+fn read_oauth_access_token() -> Result<String, String> {
+    let path = resolve_claude_credentials_path()?;
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("Could not read Claude credentials: {error}"))?;
+    let json: serde_json::Value = serde_json::from_str(strip_utf8_bom(&raw))
+        .map_err(|error| format!("Could not parse Claude credentials: {error}"))?;
+
+    json.get("claudeAiOauth")
+        .and_then(|oauth| oauth.get("accessToken"))
+        .and_then(|token| token.as_str())
+        .filter(|token| !token.trim().is_empty())
+        .map(|token| token.to_string())
+        .ok_or_else(|| "No OAuth access token found in Claude credentials.".to_string())
+}
+
+fn parse_usage_window(value: Option<&serde_json::Value>) -> Option<UsageWindow> {
+    let window = value?;
+    if window.is_null() {
+        return None;
+    }
+
+    let utilization = window.get("utilization")?.as_f64()?;
+    let resets_at = window.get("resets_at")?.as_str()?.to_string();
+
+    Some(UsageWindow {
+        utilization,
+        resets_at,
+    })
+}
+
+fn fetch_claude_usage() -> Result<ClaudeUsage, String> {
+    let token = read_oauth_access_token()?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("Could not build HTTP client: {error}"))?;
+
+    let response = client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .map_err(|error| format!("Usage request failed: {error}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Usage endpoint returned HTTP {}.",
+            response.status().as_u16()
+        ));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .map_err(|error| format!("Could not parse usage response: {error}"))?;
+
+    Ok(ClaudeUsage {
+        five_hour: parse_usage_window(body.get("five_hour")),
+        seven_day: parse_usage_window(body.get("seven_day")),
+    })
+}
+
+#[tauri::command]
+async fn get_claude_usage() -> Result<ClaudeUsage, String> {
+    tauri::async_runtime::spawn_blocking(fetch_claude_usage)
+        .await
+        .map_err(|error| format!("Usage task failed: {error}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -450,13 +545,16 @@ pub fn run() {
             read_state_file,
             get_claude_setup_status,
             configure_claude_hooks,
-            reset_session_binding
+            reset_session_binding,
+            get_claude_usage
         ])
         .setup(|app| {
             let toggle_window =
                 MenuItem::with_id(app, "toggle_window", "Open/Hide", true, None::<&str>)?;
             let toggle_sound =
                 MenuItem::with_id(app, "toggle_sound", "Sound On/Off", true, None::<&str>)?;
+            let toggle_details =
+                MenuItem::with_id(app, "toggle_details", "Show/Hide Details", true, None::<&str>)?;
             let configure_hooks = MenuItem::with_id(
                 app,
                 "configure_claude_hooks",
@@ -474,7 +572,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&toggle_window, &toggle_sound, &configure_hooks, &reconnect, &quit],
+                &[&toggle_window, &toggle_sound, &toggle_details, &configure_hooks, &reconnect, &quit],
             )?;
 
             let runtime_state = app.state::<RuntimeState>();
@@ -504,6 +602,11 @@ pub fn run() {
                     "toggle_sound" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.emit("toggle-sound", ());
+                        }
+                    }
+                    "toggle_details" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("toggle-details", ());
                         }
                     }
                     "configure_claude_hooks" => {

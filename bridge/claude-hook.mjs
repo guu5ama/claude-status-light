@@ -23,7 +23,7 @@ async function writeDebugEntry(entry) {
     return;
   }
 
-  await appendDebugLog(resolveDebugLogPath(), entry);
+  await appendDebugLog(resolveDebugLogPath({ bridgeDir }), entry);
 }
 
 async function readStdin() {

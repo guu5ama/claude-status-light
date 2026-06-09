@@ -50,6 +50,15 @@ Create and use these files only:
 - `claude-status-light/bridge/__tests__/classify-event.test.mjs` - event classifier tests
 - `claude-status-light/bridge/__tests__/write-state.test.mjs` - atomic write tests
 
+Post-MVP additions (Tasks 10-11) also use these files:
+
+- `claude-status-light/src/lib/usage.ts` - usage types, parsing, percent/reset formatting
+- `claude-status-light/src/lib/__tests__/usage.test.ts` - usage parsing and formatting tests
+- `claude-status-light/src/hooks/useClaudeUsage.ts` - low-frequency usage polling hook
+- `claude-status-light/src/components/UsagePanel.tsx` - the two usage dials
+- `claude-status-light/src/lib/design.ts` - window/design size constants
+- `claude-status-light/src-tauri/capabilities/default.json` - window permissions
+
 Assumptions locked in before implementation:
 
 - Keep all work inside `claude-status-light`
@@ -1499,6 +1508,115 @@ git add bridge/README.md 2026-06-07-claude-status-light-design.md
 git commit -m "docs: add local setup and verification notes"
 ```
 
+### Task 10: Claude plan-usage dials (post-MVP)
+
+> Already implemented and verified. Checkboxes reflect completion.
+
+**Files:**
+- Create: `claude-status-light/src/lib/usage.ts`
+- Create: `claude-status-light/src/lib/__tests__/usage.test.ts`
+- Create: `claude-status-light/src/hooks/useClaudeUsage.ts`
+- Create: `claude-status-light/src/components/UsagePanel.tsx`
+- Modify: `claude-status-light/src-tauri/Cargo.toml`
+- Modify: `claude-status-light/src-tauri/src/lib.rs`
+- Modify: `claude-status-light/src/App.tsx`
+- Modify: `claude-status-light/src/styles.css`
+- Modify: `claude-status-light/src/lib/design.ts`
+- Modify: `claude-status-light/src-tauri/tauri.conf.json`
+
+- [x] **Step 1: Write failing tests for usage parsing and reset formatting**
+
+Cover `parseClaudeUsage` (snake_case `five_hour` / `seven_day` from the backend), `clampUtilization`, and `formatResetIn` (minutes/hours/days, unparseable → empty).
+
+Run: `npm test -- src/lib/__tests__/usage.test.ts`
+Expected: FAIL (module not found), then PASS after Step 2.
+
+- [x] **Step 2: Implement `usage.ts`**
+
+`ClaudeUsage` / `UsageWindow` types, `parseClaudeUsage` (defensive, returns null when neither window is present), `clampUtilization` (round + 0-100), `formatResetIn(resetsAt, now)`.
+
+- [x] **Step 3: Add the Rust `get_claude_usage` command**
+
+In `Cargo.toml` add `reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots", "json"] }`. `rustls` avoids the Windows schannel revocation failure; native roots trust an intercepting/corporate CA.
+
+In `lib.rs`, read the OAuth token from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`), then:
+
+```rust
+let response = client
+    .get("https://api.anthropic.com/api/oauth/usage")
+    .header("Authorization", format!("Bearer {token}"))
+    .header("anthropic-beta", "oauth-2025-04-20")
+    .header("anthropic-version", "2023-06-01")
+    .send()?;
+```
+
+Parse `five_hour` / `seven_day` `{utilization, resets_at}` and return them. Run the blocking client inside `tauri::async_runtime::spawn_blocking`. Register `get_claude_usage` in the invoke handler.
+
+- [x] **Step 4: Add `useClaudeUsage` and the `UsagePanel` dials**
+
+Hook polls `get_claude_usage` every 5 minutes (the endpoint rate-limits hard) and keeps the last good value on any error. `UsagePanel` renders two SVG ring dials (`5H` / `7D` label on top, percent in center, `resets in Xh` below). Ring + percent are orange-yellow below 80% and orange at 80%+. Transparent center; dark text outline for legibility on any wallpaper.
+
+- [x] **Step 5: Make room and verify**
+
+Increase the design/window heights in `design.ts` + `tauri.conf.json`. Wire `UsagePanel` into `App.tsx`.
+
+Run: `npm test` → PASS
+Run: `npm run build` → PASS
+Run: `cargo check` (inside the VS dev environment) → PASS
+
+- [x] **Step 6: Commit**
+
+```bash
+git add src/lib/usage.ts src/hooks/useClaudeUsage.ts src/components/UsagePanel.tsx src/App.tsx src/styles.css src/lib/design.ts src-tauri
+git commit -m "feat: show claude plan usage dials"
+```
+
+### Task 11: Show/Hide Details toggle (post-MVP)
+
+> Already implemented and verified. Checkboxes reflect completion.
+
+**Files:**
+- Modify: `claude-status-light/src-tauri/src/lib.rs`
+- Modify: `claude-status-light/src-tauri/capabilities/default.json`
+- Modify: `claude-status-light/src/App.tsx`
+- Modify: `claude-status-light/src/lib/design.ts`
+- Modify: `claude-status-light/src/styles.css`
+
+- [x] **Step 1: Add the tray item and event**
+
+Add a `toggle_details` menu item that emits `toggle-details` to the main window, mirroring `toggle_sound`.
+
+- [x] **Step 2: Grant the window-resize permission**
+
+Add `core:window:allow-set-size` to `capabilities/default.json`.
+
+- [x] **Step 3: Add the toggle in the app**
+
+`detailsVisible` state (default true) hides the whole area below the light (status label, setup note, usage panel). A `toggle-details` listener and an in-window chevron button both call a sequenced handler:
+
+- expanding: grow the window first, then render the details
+- collapsing: render the collapsed layout first (await a paint), then shrink the window
+
+This avoids a scale flash during the resize.
+
+- [x] **Step 4: Keep the light from jumping**
+
+Add a `COLLAPSED_DESIGN_HEIGHT` / `COLLAPSED_WINDOW_HEIGHT` so the light stays full scale when collapsed, and set `align-content: start` + `transform-origin: top` so content is top-anchored and the light holds a fixed position across toggles.
+
+- [x] **Step 5: Verify**
+
+Run: `npm test` → PASS
+Run: `npm run build` → PASS
+Run: `cargo check` → PASS
+Manual: toggle from tray and from the chevron button; the light does not move and the window shrinks/grows with no flash.
+
+- [x] **Step 6: Commit**
+
+```bash
+git add src-tauri src/App.tsx src/lib/design.ts src/styles.css
+git commit -m "feat: add show/hide details toggle"
+```
+
 ## Self-Review
 
 Spec coverage:
@@ -1508,6 +1626,8 @@ Spec coverage:
 - Sound on/off: Task 7
 - Floating app and tray: Tasks 5 and 8
 - VS Code-compatible hook flow: Task 3 docs and bridge entrypoint
+- Claude plan-usage dials: Task 10 (post-MVP)
+- Show/Hide Details toggle with window resize: Task 11 (post-MVP)
 
 Placeholder scan:
 
