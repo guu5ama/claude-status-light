@@ -8,6 +8,10 @@ Claude Status Light sits on your desktop and mirrors Claude Code session state i
 - `red blinking` = Claude is waiting for you
 - `green solid` = Claude answered and is done with the current turn
 
+<p align="center">
+  <img src="docs/screenshots/app.png" alt="Claude Status Light: running state with Session and Weekly usage dials" width="190" />
+</p>
+
 It is built with `Tauri + React`, plus a small local hook bridge that listens to Claude Code hooks and writes shared state for the desktop app.
 
 Current scope:
@@ -15,6 +19,12 @@ Current scope:
 - supported workflow: Claude Code inside VS Code
 - current docs and release testing are written around the VS Code plugin flow
 - other Claude Code surfaces may work if they emit the same hooks, but they are not the primary documented target today
+
+## What's New in 0.2.0
+
+- **Plan usage dials** — Session (5h) and Weekly (7d) usage, mirrored from Claude Code's `/usage`, shown as two ring gauges below the light. Orange-yellow under 80%, orange at 80%+.
+- **Show/Hide Details** — collapse everything below the traffic light down to a compact signal, from the tray menu or the in-window chevron button; the window resizes to match.
+- **Sharper contrast** — status and usage text now stay legible on any desktop wallpaper.
 
 ## Why
 
@@ -62,6 +72,10 @@ This project is currently aimed at one main use case:
 The underlying hook system is shared Claude Code behavior, so other surfaces may work. But the README, release flow, and troubleshooting guidance are intentionally centered on the VS Code plugin experience first.
 
 ## Status Semantics
+
+<p align="center">
+  <img src="docs/screenshots/states.png" alt="Running (yellow), Pending You (red), Done (green)" width="460" />
+</p>
 
 - `UserPromptSubmit` -> `running`
 - `Notification(permission_prompt | idle_prompt | elicitation_dialog)` -> `pending_user`
