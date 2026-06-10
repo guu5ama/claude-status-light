@@ -8,7 +8,7 @@ struct TargetHookConfig {
     matcher: &'static str,
 }
 
-const TARGET_HOOKS: [TargetHookConfig; 4] = [
+const TARGET_HOOKS: [TargetHookConfig; 5] = [
     TargetHookConfig {
         event_name: "UserPromptSubmit",
         matcher: "",
@@ -20,6 +20,10 @@ const TARGET_HOOKS: [TargetHookConfig; 4] = [
     TargetHookConfig {
         event_name: "PreToolUse",
         matcher: "AskUserQuestion",
+    },
+    TargetHookConfig {
+        event_name: "PostToolUse",
+        matcher: "",
     },
     TargetHookConfig {
         event_name: "Stop",
@@ -399,6 +403,18 @@ mod tests {
             })
         );
         assert_eq!(
+            settings["hooks"]["PostToolUse"][0],
+            json!({
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"bridge\""
+                    }
+                ]
+            })
+        );
+        assert_eq!(
             settings["hooks"]["Stop"][0]["hooks"][0]["command"],
             json!("node \"bridge\"")
         );
@@ -480,6 +496,17 @@ mod tests {
                         ]
                     }
                 ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"bridge\""
+                            }
+                        ]
+                    }
+                ],
                 "Stop": [
                     {
                         "matcher": "",
@@ -530,6 +557,17 @@ mod tests {
                 "PreToolUse": [
                     {
                         "matcher": "AskUserQuestion",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"/Users/shan/Claude Status Light/bridge/claude-hook.mjs\""
+                            }
+                        ]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
                         "hooks": [
                             {
                                 "type": "command",
@@ -646,6 +684,17 @@ mod tests {
                         ]
                     }
                 ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"C:/Users/shan/Desktop/Claude Status Light Portable/bridge/claude-hook.mjs\""
+                            }
+                        ]
+                    }
+                ],
                 "Stop": [
                     {
                         "matcher": "",
@@ -710,6 +759,17 @@ mod tests {
                         ]
                     }
                 ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"C:/code/claude-status-light/bridge/claude-hook.mjs\""
+                            }
+                        ]
+                    }
+                ],
                 "Stop": [
                     {
                         "matcher": "",
@@ -751,6 +811,17 @@ mod tests {
                 "PreToolUse": [
                     {
                         "matcher": "AskUserQuestion",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"C:/code/claude-status-light/bridge/claude-hook.mjs\""
+                            }
+                        ]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
                         "hooks": [
                             {
                                 "type": "command",
@@ -1028,6 +1099,21 @@ mod tests {
                             {
                                 "type": "command",
                                 "command": "node \"keep-pretool\""
+                            },
+                            {
+                                "type": "command",
+                                "command": current_command
+                            }
+                        ]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "node \"keep-posttool\""
                             },
                             {
                                 "type": "command",

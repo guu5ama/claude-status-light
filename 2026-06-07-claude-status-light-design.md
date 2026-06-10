@@ -186,8 +186,11 @@ State transitions:
 - `Notification(idle_prompt)` -> `pending_user`
 - `Notification(elicitation_dialog)` -> `pending_user`
 - `PreToolUse(AskUserQuestion)` -> `pending_user`
+- `PostToolUse` -> `running`
 - `Stop` + completion signal -> `done`
 - `Stop` + direct answer with no waiting signal -> `done`
+
+`PostToolUse -> running` is what moves the light off red after the user answers an `AskUserQuestion` or approves a permission prompt: Claude Code does not fire `UserPromptSubmit` for those interactions, so without it the light would stay red until the next `Stop` (red -> green with no yellow in between).
 
 Rules:
 
@@ -260,7 +263,7 @@ Current implementation shape:
 - Tauri backend resolves the bridge script path from either bundled resources or the development checkout
 - Hook merge is done through a pure Rust JSON merger
 - Existing valid `claude-hook.mjs` entries are detected first and treated as already configured before any rewrite is attempted
-- Automatic configuration now treats `UserPromptSubmit`, `Notification`, `PreToolUse(AskUserQuestion)`, and `Stop` as the required bridge hook set
+- Automatic configuration now treats `UserPromptSubmit`, `Notification`, `PreToolUse(AskUserQuestion)`, `PostToolUse`, and `Stop` as the required bridge hook set
 - UTF-8 BOM in `settings.json` is stripped before JSON parsing so previously written Windows config files do not trigger false setup failures
 - The running app location is now treated as the only valid Claude Status Light hook path
 - Stale Claude Status Light bridge paths that point at old repos or old portable folders are removed and rewritten to the current app location

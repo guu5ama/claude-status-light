@@ -6,7 +6,7 @@ The desktop app can configure these hooks automatically on startup, but the sche
 
 ## Claude Code Settings
 
-Add the same command hook to `UserPromptSubmit`, `Notification`, `PreToolUse` for `AskUserQuestion`, and `Stop` in `~/.claude/settings.json`:
+Add the same command hook to `UserPromptSubmit`, `Notification`, `PreToolUse` for `AskUserQuestion`, `PostToolUse`, and `Stop` in `~/.claude/settings.json`:
 
 ```json
 {
@@ -36,6 +36,17 @@ Add the same command hook to `UserPromptSubmit`, `Notification`, `PreToolUse` fo
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"C:/code/claude-status-light/bridge/claude-hook.mjs\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",

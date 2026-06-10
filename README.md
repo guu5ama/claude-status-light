@@ -54,7 +54,7 @@ macOS note:
 
 ## How It Works
 
-1. Claude Code fires hooks for `UserPromptSubmit`, `Notification`, `PreToolUse(AskUserQuestion)`, and `Stop`.
+1. Claude Code fires hooks for `UserPromptSubmit`, `Notification`, `PreToolUse(AskUserQuestion)`, `PostToolUse`, and `Stop`.
 2. `bridge/claude-hook.mjs` receives the hook payload on `stdin`.
 3. The bridge writes normalized state to a shared `state.json`.
 4. The desktop app polls that state and updates the light and sounds.
@@ -80,6 +80,7 @@ The underlying hook system is shared Claude Code behavior, so other surfaces may
 - `UserPromptSubmit` -> `running`
 - `Notification(permission_prompt | idle_prompt | elicitation_dialog)` -> `pending_user`
 - `PreToolUse(AskUserQuestion)` -> `pending_user`
+- `PostToolUse` -> `running` (so the light leaves red after you answer a question or approve a permission, since those don't fire `UserPromptSubmit`)
 - `Stop`:
   - wait-for-user language -> `pending_user`
   - explicit completion language -> `done`
@@ -236,6 +237,17 @@ Automatic setup is the default and recommended path. For development or troubles
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"C:/code/claude-status-light/bridge/claude-hook.mjs\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",

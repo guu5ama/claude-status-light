@@ -23,6 +23,25 @@ test('maps AskUserQuestion tool requests to pending_user before the tool execute
   assert.equal(result.doneReason, 'tool_waiting_for_user_input');
 });
 
+test('maps PostToolUse to running so the light leaves red after the user answers a tool', () => {
+  const answered = classifyHookEvent({
+    session_id: 's1',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion'
+  });
+
+  assert.equal(answered.status, 'running');
+  assert.equal(answered.doneReason, 'tool_completed');
+
+  const otherTool = classifyHookEvent({
+    session_id: 's1',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash'
+  });
+
+  assert.equal(otherTool.status, 'running');
+});
+
 test('maps Stop with completion text to done', () => {
   const result = classifyHookEvent({
     session_id: 's1',

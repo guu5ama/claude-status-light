@@ -107,6 +107,13 @@ export function classifyHookEvent(payload) {
     return createState(payload, 'pending_user', 'tool_waiting_for_user_input');
   }
 
+  // After a tool finishes (including the user answering an AskUserQuestion or
+  // approving a permission), Claude is working again. Claude Code does not fire
+  // UserPromptSubmit for those, so PostToolUse is what moves the light off red.
+  if (eventName === 'PostToolUse') {
+    return createState(payload, 'running', 'tool_completed');
+  }
+
   if (eventName === 'Stop') {
     const inferred = inferStopState(payload?.last_assistant_message);
     return createState(payload, inferred.status, inferred.doneReason);
