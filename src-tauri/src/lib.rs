@@ -466,19 +466,44 @@ struct ClaudeUsage {
     seven_day: Option<UsageWindow>,
 }
 
-fn read_oauth_access_token() -> Result<String, String> {
-    let path = resolve_claude_credentials_path()?;
-    let raw = fs::read_to_string(&path)
-        .map_err(|error| format!("Could not read Claude credentials: {error}"))?;
-    let json: serde_json::Value = serde_json::from_str(strip_utf8_bom(&raw))
-        .map_err(|error| format!("Could not parse Claude credentials: {error}"))?;
-
+fn extract_access_token(raw: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(strip_utf8_bom(raw)).ok()?;
     json.get("claudeAiOauth")
         .and_then(|oauth| oauth.get("accessToken"))
         .and_then(|token| token.as_str())
         .filter(|token| !token.trim().is_empty())
         .map(|token| token.to_string())
-        .ok_or_else(|| "No OAuth access token found in Claude credentials.".to_string())
+}
+
+// On macOS, Claude Code stores its OAuth credentials in the login Keychain
+// rather than ~/.claude/.credentials.json, so read them back via `security`.
+#[cfg(target_os = "macos")]
+fn read_keychain_access_token() -> Option<String> {
+    let output = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    extract_access_token(&raw)
+}
+
+fn read_oauth_access_token() -> Result<String, String> {
+    let path = resolve_claude_credentials_path()?;
+    if let Ok(raw) = fs::read_to_string(&path) {
+        if let Some(token) = extract_access_token(&raw) {
+            return Ok(token);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(token) = read_keychain_access_token() {
+        return Ok(token);
+    }
+
+    Err("No OAuth access token found in Claude credentials.".to_string())
 }
 
 fn parse_usage_window(value: Option<&serde_json::Value>) -> Option<UsageWindow> {
