@@ -16,7 +16,7 @@
         "label": "main",
         "title": "Claude Status Light",
         "width": 128,
-        "height": 418,
+        "height": 432,
         "resizable": false,
         "decorations": false,
         "transparent": true,
