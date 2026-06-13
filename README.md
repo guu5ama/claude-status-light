@@ -20,6 +20,14 @@ Current scope:
 - current docs and release testing are written around the VS Code plugin flow
 - other Claude Code surfaces may work if they emit the same hooks, but they are not the primary documented target today
 
+## What's New in 0.3.0
+
+- **Account switching across config paths** — a new tray **Account** submenu lists every Claude config directory found in your home folder (`~/.claude`, `~/.claude-company`, …). Pick one and the usage dials track that account; the choice persists across restarts. See "Switching Accounts" below.
+- **Per-path credentials** — the OAuth token is read from the selected path's `.credentials.json`, or on macOS from the Keychain entry Claude apps create per config dir, so any app logged into a path can be tracked.
+- **No more silent failures** — if the selected path has no usable login (missing or expired token, or the API rejects it), the panel shows `NO ACTIVE LOGIN` naming the path instead of hiding the dials. Transient network errors still keep the last good values.
+- **Hooks everywhere** — automatic hook setup now installs the bridge into every discovered config path, so sessions from any of them drive the light.
+- **Fixed bundled bridge resolution** — installed builds now find the bridge under `Resources/_up_/bridge` (previously they silently fell back to a dev path, breaking hook setup on machines without the repo).
+
 ## What's New in 0.2.3
 
 Windows-focused fixes:
@@ -117,14 +125,25 @@ Each dial shows the percentage used in the center and `resets in Xh` below. The 
 
 How it is fetched:
 
-- the Tauri backend reads your OAuth token from `~/.claude/.credentials.json` (the same credentials Claude Code uses) and calls the official `https://api.anthropic.com/api/oauth/usage` endpoint
+- the Tauri backend reads the OAuth token belonging to the selected config path (see "Switching Accounts" below) and calls the official `https://api.anthropic.com/api/oauth/usage` endpoint
+- the token comes from `<config dir>/.credentials.json`, or on macOS from the login Keychain entry that Claude apps create for that config dir
 - it is polled at a low frequency (every 5 minutes) because the endpoint rate-limits aggressively
-- on any error the last known values are kept; nothing is ever sent anywhere, usage percentages are only read back for display
-- if the token is expired or no data has been fetched yet, the dials simply do not appear
+- on transient errors (network, rate limits) the last known values are kept; nothing is ever sent anywhere, usage percentages are only read back for display
+- if the selected config path has no credentials, an expired token, or the API rejects the token, the panel shows `NO ACTIVE LOGIN` with the config path — sign in again with whatever Claude app uses that path
+
+## Switching Accounts (Config Paths)
+
+If you run Claude with more than one account — for example a personal account in `~/.claude` and a company account in `~/.claude-company` via `CLAUDE_CONFIG_DIR` — the tray menu gets an **Account** submenu listing every Claude config directory found in your home folder (`.claude*` directories that contain Claude footprints such as `settings.json` or `projects/`).
+
+- pick a config path in the Account submenu to point the usage dials at that account
+- the small path label above the dials shows which config path is being tracked
+- the choice is remembered across restarts (stored in the app's own `profiles.json`, never inside any Claude config dir)
+- the app never logs in or out for you; it only reads tokens that Claude apps already stored for each path, so any app (Claude Code CLI, the VS Code extension, or whatever replaces them) logged into a path can be tracked
+- config dirs outside your home folder can be added manually to `profiles.json` via `extraConfigDirs`
 
 ## Automatic Hook Setup
 
-On startup, the app tries to manage `~/.claude/settings.json` for you.
+On startup, the app tries to manage `settings.json` in every discovered Claude config directory (`~/.claude`, `~/.claude-company`, …) so sessions from any of them drive the light.
 
 Behavior:
 

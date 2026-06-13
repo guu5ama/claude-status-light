@@ -1,4 +1,10 @@
-import { clampUtilization, formatResetIn, type ClaudeUsage, type UsageWindow } from '../lib/usage';
+import {
+  clampUtilization,
+  formatResetIn,
+  type ClaudeUsage,
+  type UsageError,
+  type UsageWindow
+} from '../lib/usage';
 
 const HOT_THRESHOLD = 80;
 const RADIUS = 15;
@@ -33,15 +39,38 @@ function UsageDial({ label, window }: { label: string; window: UsageWindow }) {
   );
 }
 
-export function UsagePanel({ usage }: { usage: ClaudeUsage | null }) {
-  if (!usage || (!usage.fiveHour && !usage.sevenDay)) {
+export interface UsagePanelProps {
+  usage: ClaudeUsage | null;
+  error?: UsageError | null;
+  configDirLabel?: string | null;
+}
+
+export function UsagePanel({ usage, error = null, configDirLabel = null }: UsagePanelProps) {
+  const hasDials = Boolean(usage && (usage.fiveHour || usage.sevenDay));
+  const loginError = error?.kind === 'no_active_login' ? error : null;
+
+  if (!hasDials && !loginError) {
     return null;
   }
 
   return (
     <div className="usage-panel" data-testid="usage-panel">
-      {usage.fiveHour ? <UsageDial label="5H" window={usage.fiveHour} /> : null}
-      {usage.sevenDay ? <UsageDial label="7D" window={usage.sevenDay} /> : null}
+      {configDirLabel ? (
+        <div className="usage-panel__profile" title={configDirLabel}>
+          {configDirLabel}
+        </div>
+      ) : null}
+      {loginError ? (
+        <div className="usage-panel__error" role="alert" title={loginError.message}>
+          <div className="usage-panel__error-title">NO ACTIVE LOGIN</div>
+          <div className="usage-panel__error-detail">{loginError.message}</div>
+        </div>
+      ) : (
+        <div className="usage-panel__dials">
+          {usage?.fiveHour ? <UsageDial label="5H" window={usage.fiveHour} /> : null}
+          {usage?.sevenDay ? <UsageDial label="7D" window={usage.sevenDay} /> : null}
+        </div>
+      )}
     </div>
   );
 }

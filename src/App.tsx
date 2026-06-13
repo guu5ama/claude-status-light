@@ -115,7 +115,7 @@ function SoundIcon({ muted }: { muted: boolean }) {
 
 export default function App() {
   const state = useStatusState('/state/state.json', 500);
-  const usage = useClaudeUsage();
+  const { usage, error: usageError, configDirLabel } = useClaudeUsage();
   const { soundEnabled, toggleSound } = useSoundToggle(true);
   const previousStatus = useRef(state.status);
   const toggleSoundRef = useRef(toggleSound);
@@ -292,7 +292,7 @@ export default function App() {
                 ) : null}
               </div>
             ) : null}
-            <UsagePanel usage={usage} />
+            <UsagePanel usage={usage} error={usageError} configDirLabel={configDirLabel} />
           </div>
         ) : null}
         <div className="app-controls">

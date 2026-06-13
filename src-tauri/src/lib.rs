@@ -1,4 +1,5 @@
 mod claude_settings;
+mod profiles;
 mod runtime_paths;
 
 #[cfg(target_os = "windows")]
@@ -28,13 +29,35 @@ use claude_settings::{
     ClaudeSetupStatusKind,
 };
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State,
+    AppHandle, Emitter, Manager, State, Wry,
 };
 
 struct RuntimeState {
     claude_setup_status: Mutex<ClaudeSetupStatus>,
+    active_config_dir: Mutex<PathBuf>,
+}
+
+struct ProfileMenuState {
+    items: Mutex<Vec<(PathBuf, CheckMenuItem<Wry>)>>,
+}
+
+const PROFILE_MENU_ID_PREFIX: &str = "profile:";
+
+fn home_dir() -> Result<PathBuf, String> {
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "Could not resolve the user home directory.".to_string())
+}
+
+fn profiles_config_path() -> PathBuf {
+    let state_path = resolve_state_path();
+    state_path
+        .parent()
+        .map(|parent| parent.join("profiles.json"))
+        .unwrap_or_else(|| PathBuf::from("profiles.json"))
 }
 
 static ATOMIC_WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -55,18 +78,11 @@ fn resolve_state_path() -> PathBuf {
     runtime_paths::resolve_state_path().unwrap_or_else(|_| runtime_paths::dev_state_path())
 }
 
-fn resolve_claude_settings_path() -> Result<PathBuf, String> {
-    if let Ok(path) = env::var("CLAUDE_STATUS_LIGHT_CLAUDE_SETTINGS_PATH") {
-        if !path.trim().is_empty() {
-            return Ok(PathBuf::from(path));
-        }
-    }
-
-    let home = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
-
-    Ok(PathBuf::from(home).join(".claude").join("settings.json"))
+fn override_claude_settings_path() -> Option<PathBuf> {
+    env::var("CLAUDE_STATUS_LIGHT_CLAUDE_SETTINGS_PATH")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
 }
 
 fn validate_bridge_script_path(path: &Path) -> Result<(), String> {
@@ -97,9 +113,15 @@ fn resolve_bridge_script_path(app: &AppHandle) -> Result<PathBuf, String> {
     }
 
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("bridge").join("claude-hook.mjs");
-        if bundled.is_file() {
-            return Ok(bundled);
+        // Tauri maps the `../bridge/**/*` resource glob to `_up_/bridge/`
+        // inside the bundle, so check both layouts.
+        for bundled in [
+            resource_dir.join("bridge").join("claude-hook.mjs"),
+            resource_dir.join("_up_").join("bridge").join("claude-hook.mjs"),
+        ] {
+            if bundled.is_file() {
+                return Ok(bundled);
+            }
         }
     }
 
@@ -200,7 +222,7 @@ where
 }
 
 fn run_claude_setup(app: &AppHandle) -> ClaudeSetupStatus {
-    let settings_path = match resolve_claude_settings_path() {
+    let bridge_script_path = match resolve_bridge_script_path(app) {
         Ok(path) => path,
         Err(message) => {
             return ClaudeSetupStatus {
@@ -215,13 +237,17 @@ fn run_claude_setup(app: &AppHandle) -> ClaudeSetupStatus {
         }
     };
 
-    let bridge_script_path = match resolve_bridge_script_path(app) {
-        Ok(path) => path,
+    if let Some(settings_path) = override_claude_settings_path() {
+        return run_claude_setup_for_paths(&settings_path, &bridge_script_path);
+    }
+
+    let home = match home_dir() {
+        Ok(home) => home,
         Err(message) => {
             return ClaudeSetupStatus {
                 kind: ClaudeSetupStatusKind::Failed,
                 message,
-                settings_path: settings_path.display().to_string(),
+                settings_path: String::new(),
                 backup_path: None,
                 active_bridge_path: None,
                 wrote_changes: false,
@@ -230,7 +256,78 @@ fn run_claude_setup(app: &AppHandle) -> ClaudeSetupStatus {
         }
     };
 
-    run_claude_setup_for_paths(&settings_path, &bridge_script_path)
+    let stored = profiles::load_profiles_config(&profiles_config_path());
+    let config_dirs = profiles::discover_profiles(&home, &stored.extra_config_dirs);
+
+    let statuses = config_dirs
+        .iter()
+        .map(|config_dir| {
+            (
+                profiles::display_label(config_dir, &home),
+                run_claude_setup_for_paths(&config_dir.join("settings.json"), &bridge_script_path),
+            )
+        })
+        .collect();
+
+    aggregate_setup_statuses(statuses)
+}
+
+fn aggregate_setup_statuses(mut statuses: Vec<(String, ClaudeSetupStatus)>) -> ClaudeSetupStatus {
+    if statuses.is_empty() {
+        return initial_setup_status();
+    }
+    if statuses.len() == 1 {
+        return statuses.remove(0).1;
+    }
+
+    let total = statuses.len();
+    let failures: Vec<String> = statuses
+        .iter()
+        .filter(|(_, status)| status.kind == ClaudeSetupStatusKind::Failed)
+        .map(|(label, status)| format!("{label}: {}", status.message))
+        .collect();
+    let any_configured = statuses
+        .iter()
+        .any(|(_, status)| status.kind == ClaudeSetupStatusKind::Configured);
+
+    let (kind, message) = if !failures.is_empty() {
+        let mut message = failures.join(" ");
+        if any_configured {
+            message.push_str(" Other config paths were updated.");
+        }
+        (ClaudeSetupStatusKind::Failed, message)
+    } else if any_configured {
+        (
+            ClaudeSetupStatusKind::Configured,
+            format!("Claude hook bridge paths were updated for {total} config path(s)."),
+        )
+    } else {
+        (
+            ClaudeSetupStatusKind::AlreadyConfigured,
+            format!("Claude hook bridge is already configured for {total} config path(s)."),
+        )
+    };
+
+    ClaudeSetupStatus {
+        kind,
+        message,
+        settings_path: statuses
+            .iter()
+            .map(|(_, status)| status.settings_path.clone())
+            .filter(|path| !path.is_empty())
+            .collect::<Vec<_>>()
+            .join(", "),
+        backup_path: statuses
+            .iter()
+            .find_map(|(_, status)| status.backup_path.clone()),
+        active_bridge_path: statuses
+            .iter()
+            .find_map(|(_, status)| status.active_bridge_path.clone()),
+        wrote_changes: statuses.iter().any(|(_, status)| status.wrote_changes),
+        requires_claude_restart: statuses
+            .iter()
+            .any(|(_, status)| status.requires_claude_restart),
+    }
 }
 
 fn run_claude_setup_for_paths(settings_path: &Path, bridge_script_path: &Path) -> ClaudeSetupStatus {
@@ -451,20 +548,6 @@ fn reset_session_binding() -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn resolve_claude_credentials_path() -> Result<PathBuf, String> {
-    if let Ok(path) = env::var("CLAUDE_STATUS_LIGHT_CLAUDE_CREDENTIALS_PATH") {
-        if !path.trim().is_empty() {
-            return Ok(PathBuf::from(path));
-        }
-    }
-
-    let home = env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .ok_or_else(|| "Could not resolve the user home directory.".to_string())?;
-
-    Ok(PathBuf::from(home).join(".claude").join(".credentials.json"))
-}
-
 #[derive(serde::Serialize)]
 struct UsageWindow {
     utilization: f64,
@@ -477,44 +560,107 @@ struct ClaudeUsage {
     seven_day: Option<UsageWindow>,
 }
 
-fn extract_access_token(raw: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(strip_utf8_bom(raw)).ok()?;
-    json.get("claudeAiOauth")
-        .and_then(|oauth| oauth.get("accessToken"))
-        .and_then(|token| token.as_str())
-        .filter(|token| !token.trim().is_empty())
-        .map(|token| token.to_string())
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageErrorPayload {
+    kind: &'static str,
+    message: String,
 }
 
-// On macOS, Claude Code stores its OAuth credentials in the login Keychain
-// rather than ~/.claude/.credentials.json, so read them back via `security`.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsagePayload {
+    config_dir_label: String,
+    usage: Option<ClaudeUsage>,
+    error: Option<UsageErrorPayload>,
+}
+
+enum UsageFetchError {
+    /// The selected config path has no usable login: no credentials, an
+    /// expired token, or the API rejected the token. The user must sign in
+    /// again with whatever Claude app uses that path.
+    NoActiveLogin,
+    /// Network errors, rate limits, server errors — the last good value
+    /// should be kept on the frontend.
+    Transient(String),
+}
+
+struct OauthCredentials {
+    access_token: String,
+    expires_at_ms: Option<u64>,
+}
+
+fn extract_credentials(raw: &str) -> Option<OauthCredentials> {
+    let json: serde_json::Value = serde_json::from_str(strip_utf8_bom(raw)).ok()?;
+    let oauth = json.get("claudeAiOauth")?;
+    let access_token = oauth
+        .get("accessToken")
+        .and_then(|token| token.as_str())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())?
+        .to_string();
+    let expires_at_ms = oauth.get("expiresAt").and_then(|value| value.as_u64());
+
+    Some(OauthCredentials {
+        access_token,
+        expires_at_ms,
+    })
+}
+
+fn credentials_expired(credentials: &OauthCredentials) -> bool {
+    let Some(expires_at_ms) = credentials.expires_at_ms else {
+        return false;
+    };
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    expires_at_ms <= now_ms
+}
+
+// On macOS, Claude apps store OAuth credentials in the login Keychain. The
+// service name depends on the config dir, so each config path maps to its
+// own Keychain entry regardless of which app performed the login.
 #[cfg(target_os = "macos")]
-fn read_keychain_access_token() -> Option<String> {
+fn read_keychain_credentials(service_name: &str) -> Option<OauthCredentials> {
     let output = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+        .args(["find-generic-password", "-s", service_name, "-w"])
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
     let raw = String::from_utf8(output.stdout).ok()?;
-    extract_access_token(&raw)
+    extract_credentials(&raw)
 }
 
-fn read_oauth_access_token() -> Result<String, String> {
-    let path = resolve_claude_credentials_path()?;
-    if let Ok(raw) = fs::read_to_string(&path) {
-        if let Some(token) = extract_access_token(&raw) {
-            return Ok(token);
+fn read_oauth_credentials_for(config_dir: &Path, home: &Path) -> Option<OauthCredentials> {
+    if let Ok(path) = env::var("CLAUDE_STATUS_LIGHT_CLAUDE_CREDENTIALS_PATH") {
+        if !path.trim().is_empty() {
+            return fs::read_to_string(path)
+                .ok()
+                .and_then(|raw| extract_credentials(&raw));
+        }
+    }
+
+    if let Ok(raw) = fs::read_to_string(config_dir.join(".credentials.json")) {
+        if let Some(credentials) = extract_credentials(&raw) {
+            return Some(credentials);
         }
     }
 
     #[cfg(target_os = "macos")]
-    if let Some(token) = read_keychain_access_token() {
-        return Ok(token);
+    {
+        let service_name = profiles::keychain_service_name(config_dir, home);
+        if let Some(credentials) = read_keychain_credentials(&service_name) {
+            return Some(credentials);
+        }
     }
 
-    Err("No OAuth access token found in Claude credentials.".to_string())
+    #[cfg(not(target_os = "macos"))]
+    let _ = home;
+
+    None
 }
 
 fn parse_usage_window(value: Option<&serde_json::Value>) -> Option<UsageWindow> {
@@ -532,31 +678,34 @@ fn parse_usage_window(value: Option<&serde_json::Value>) -> Option<UsageWindow> 
     })
 }
 
-fn fetch_claude_usage() -> Result<ClaudeUsage, String> {
-    let token = read_oauth_access_token()?;
+fn request_claude_usage(access_token: &str) -> Result<ClaudeUsage, UsageFetchError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|error| format!("Could not build HTTP client: {error}"))?;
+        .map_err(|error| UsageFetchError::Transient(format!("Could not build HTTP client: {error}")))?;
 
     let response = client
         .get("https://api.anthropic.com/api/oauth/usage")
-        .header("Authorization", format!("Bearer {token}"))
+        .header("Authorization", format!("Bearer {access_token}"))
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("anthropic-version", "2023-06-01")
         .send()
-        .map_err(|error| format!("Usage request failed: {error}"))?;
+        .map_err(|error| UsageFetchError::Transient(format!("Usage request failed: {error}")))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
+    let status = response.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(UsageFetchError::NoActiveLogin);
+    }
+    if !status.is_success() {
+        return Err(UsageFetchError::Transient(format!(
             "Usage endpoint returned HTTP {}.",
-            response.status().as_u16()
-        ));
+            status.as_u16()
+        )));
     }
 
     let body: serde_json::Value = response
         .json()
-        .map_err(|error| format!("Could not parse usage response: {error}"))?;
+        .map_err(|error| UsageFetchError::Transient(format!("Could not parse usage response: {error}")))?;
 
     Ok(ClaudeUsage {
         five_hour: parse_usage_window(body.get("five_hour")),
@@ -564,18 +713,103 @@ fn fetch_claude_usage() -> Result<ClaudeUsage, String> {
     })
 }
 
+fn no_active_login_message(config_dir_label: &str) -> String {
+    format!(
+        "No active login found for {config_dir_label}. Sign in with any Claude app that uses this config path, then switch back here."
+    )
+}
+
+fn fetch_claude_usage_for(config_dir: PathBuf, home: PathBuf) -> UsagePayload {
+    let config_dir_label = profiles::display_label(&config_dir, &home);
+
+    let result = match read_oauth_credentials_for(&config_dir, &home) {
+        None => Err(UsageFetchError::NoActiveLogin),
+        Some(credentials) if credentials_expired(&credentials) => {
+            Err(UsageFetchError::NoActiveLogin)
+        }
+        Some(credentials) => request_claude_usage(&credentials.access_token),
+    };
+
+    match result {
+        Ok(usage) => UsagePayload {
+            config_dir_label,
+            usage: Some(usage),
+            error: None,
+        },
+        Err(UsageFetchError::NoActiveLogin) => {
+            let message = no_active_login_message(&config_dir_label);
+            UsagePayload {
+                config_dir_label,
+                usage: None,
+                error: Some(UsageErrorPayload {
+                    kind: "no_active_login",
+                    message,
+                }),
+            }
+        }
+        Err(UsageFetchError::Transient(message)) => UsagePayload {
+            config_dir_label,
+            usage: None,
+            error: Some(UsageErrorPayload {
+                kind: "transient",
+                message,
+            }),
+        },
+    }
+}
+
 #[tauri::command]
-async fn get_claude_usage() -> Result<ClaudeUsage, String> {
-    tauri::async_runtime::spawn_blocking(fetch_claude_usage)
+async fn get_claude_usage(state: State<'_, RuntimeState>) -> Result<UsagePayload, String> {
+    let config_dir = state
+        .active_config_dir
+        .lock()
+        .map(|guard| guard.clone())
+        .map_err(|_| "Could not read the active config path.".to_string())?;
+    let home = home_dir()?;
+
+    tauri::async_runtime::spawn_blocking(move || fetch_claude_usage_for(config_dir, home))
         .await
-        .map_err(|error| format!("Usage task failed: {error}"))?
+        .map_err(|error| format!("Usage task failed: {error}"))
+}
+
+fn set_active_profile(app: &AppHandle, config_dir: PathBuf) {
+    let menu_state = app.state::<ProfileMenuState>();
+    if let Ok(items) = menu_state.items.lock() {
+        for (dir, item) in items.iter() {
+            let _ = item.set_checked(*dir == config_dir);
+        }
+    }
+
+    let runtime_state = app.state::<RuntimeState>();
+    if let Ok(mut active) = runtime_state.active_config_dir.lock() {
+        *active = config_dir.clone();
+    }
+
+    let config_path = profiles_config_path();
+    let mut stored = profiles::load_profiles_config(&config_path);
+    stored.active_config_dir = Some(config_dir.to_string_lossy().to_string());
+    let _ = profiles::save_profiles_config(&config_path, &stored);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("active-profile-changed", ());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let home = home_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let stored_profiles = profiles::load_profiles_config(&profiles_config_path());
+    let discovered_profiles = profiles::discover_profiles(&home, &stored_profiles.extra_config_dirs);
+    let active_config_dir = profiles::resolve_active_profile(
+        &discovered_profiles,
+        stored_profiles.active_config_dir.as_deref(),
+        &home,
+    );
+
     tauri::Builder::default()
         .manage(RuntimeState {
             claude_setup_status: Mutex::new(initial_setup_status()),
+            active_config_dir: Mutex::new(active_config_dir.clone()),
         })
         .invoke_handler(tauri::generate_handler![
             read_state_file,
@@ -584,13 +818,35 @@ pub fn run() {
             reset_session_binding,
             get_claude_usage
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let toggle_window =
                 MenuItem::with_id(app, "toggle_window", "Open/Hide", true, None::<&str>)?;
             let toggle_sound =
                 MenuItem::with_id(app, "toggle_sound", "Sound On/Off", true, None::<&str>)?;
             let toggle_details =
                 MenuItem::with_id(app, "toggle_details", "Show/Hide Details", true, None::<&str>)?;
+
+            let mut profile_items: Vec<(PathBuf, CheckMenuItem<Wry>)> = Vec::new();
+            for config_dir in &discovered_profiles {
+                let item = CheckMenuItem::with_id(
+                    app,
+                    format!("{PROFILE_MENU_ID_PREFIX}{}", config_dir.to_string_lossy()),
+                    profiles::display_label(config_dir, &home),
+                    true,
+                    *config_dir == active_config_dir,
+                    None::<&str>,
+                )?;
+                profile_items.push((config_dir.clone(), item));
+            }
+            let account_item_refs: Vec<&dyn IsMenuItem<Wry>> = profile_items
+                .iter()
+                .map(|(_, item)| item as &dyn IsMenuItem<Wry>)
+                .collect();
+            let account_menu = Submenu::with_items(app, "Account", true, &account_item_refs)?;
+            app.manage(ProfileMenuState {
+                items: Mutex::new(profile_items),
+            });
+
             let configure_hooks = MenuItem::with_id(
                 app,
                 "configure_claude_hooks",
@@ -608,7 +864,15 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&toggle_window, &toggle_sound, &toggle_details, &configure_hooks, &reconnect, &quit],
+                &[
+                    &toggle_window,
+                    &toggle_sound,
+                    &toggle_details,
+                    &account_menu,
+                    &configure_hooks,
+                    &reconnect,
+                    &quit,
+                ],
             )?;
 
             let runtime_state = app.state::<RuntimeState>();
@@ -656,6 +920,10 @@ pub fn run() {
                         }
                     }
                     "quit" => app.exit(0),
+                    id if id.starts_with(PROFILE_MENU_ID_PREFIX) => {
+                        let config_dir = PathBuf::from(&id[PROFILE_MENU_ID_PREFIX.len()..]);
+                        set_active_profile(app, config_dir);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -699,8 +967,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_atomic_write_paths, build_backup_path, format_hook_command, initial_setup_status,
-        replace_file_with_rollback, run_claude_setup_for_paths, ClaudeSetupStatusKind,
+        aggregate_setup_statuses, build_atomic_write_paths, build_backup_path,
+        credentials_expired, extract_credentials, fetch_claude_usage_for, format_hook_command,
+        initial_setup_status, no_active_login_message, replace_file_with_rollback,
+        run_claude_setup_for_paths, ClaudeSetupStatus, ClaudeSetupStatusKind, OauthCredentials,
     };
     use serde_json::json;
     use std::{
@@ -738,6 +1008,13 @@ mod tests {
                 }],
                 "PreToolUse": [{
                     "matcher": "AskUserQuestion",
+                    "hooks": [{
+                        "type": "command",
+                        "command": command
+                    }]
+                }],
+                "PostToolUse": [{
+                    "matcher": "",
                     "hooks": [{
                         "type": "command",
                         "command": command
@@ -796,6 +1073,9 @@ mod tests {
         assert!(!status.requires_claude_restart);
     }
 
+    // Verbatim `\\?\` path prefixes only exist on Windows; other platforms
+    // treat them as a literal (nonexistent) path.
+    #[cfg(target_os = "windows")]
     #[test]
     fn normalizes_windows_verbatim_prefix_in_active_bridge_path() {
         let temp_dir = unique_test_dir("normalized-active-bridge");
@@ -972,5 +1252,142 @@ mod tests {
         let backup_b = build_backup_path(&settings_path);
 
         assert_ne!(backup_a, backup_b);
+    }
+
+    fn setup_status(kind: ClaudeSetupStatusKind, message: &str, settings_path: &str) -> ClaudeSetupStatus {
+        ClaudeSetupStatus {
+            kind: kind.clone(),
+            message: message.into(),
+            settings_path: settings_path.into(),
+            backup_path: None,
+            active_bridge_path: Some("/apps/bridge/claude-hook.mjs".into()),
+            wrote_changes: kind == ClaudeSetupStatusKind::Configured,
+            requires_claude_restart: kind == ClaudeSetupStatusKind::Configured,
+        }
+    }
+
+    #[test]
+    fn aggregates_multi_profile_setup_as_configured_when_any_path_was_updated() {
+        let aggregated = aggregate_setup_statuses(vec![
+            (
+                "~/.claude".into(),
+                setup_status(
+                    ClaudeSetupStatusKind::AlreadyConfigured,
+                    "already",
+                    "/Users/gj/.claude/settings.json",
+                ),
+            ),
+            (
+                "~/.claude-company".into(),
+                setup_status(
+                    ClaudeSetupStatusKind::Configured,
+                    "updated",
+                    "/Users/gj/.claude-company/settings.json",
+                ),
+            ),
+        ]);
+
+        assert_eq!(aggregated.kind, ClaudeSetupStatusKind::Configured);
+        assert_eq!(
+            aggregated.message,
+            "Claude hook bridge paths were updated for 2 config path(s)."
+        );
+        assert_eq!(
+            aggregated.settings_path,
+            "/Users/gj/.claude/settings.json, /Users/gj/.claude-company/settings.json"
+        );
+        assert!(aggregated.wrote_changes);
+        assert!(aggregated.requires_claude_restart);
+    }
+
+    #[test]
+    fn aggregates_multi_profile_setup_failures_with_path_labels() {
+        let aggregated = aggregate_setup_statuses(vec![
+            (
+                "~/.claude".into(),
+                setup_status(
+                    ClaudeSetupStatusKind::Configured,
+                    "updated",
+                    "/Users/gj/.claude/settings.json",
+                ),
+            ),
+            (
+                "~/.claude-company".into(),
+                setup_status(
+                    ClaudeSetupStatusKind::Failed,
+                    "Could not parse Claude settings.json: oops",
+                    "/Users/gj/.claude-company/settings.json",
+                ),
+            ),
+        ]);
+
+        assert_eq!(aggregated.kind, ClaudeSetupStatusKind::Failed);
+        assert_eq!(
+            aggregated.message,
+            "~/.claude-company: Could not parse Claude settings.json: oops Other config paths were updated."
+        );
+        assert!(aggregated.wrote_changes);
+    }
+
+    #[test]
+    fn aggregate_with_single_status_returns_it_unchanged() {
+        let aggregated = aggregate_setup_statuses(vec![(
+            "~/.claude".into(),
+            setup_status(
+                ClaudeSetupStatusKind::AlreadyConfigured,
+                "already",
+                "/Users/gj/.claude/settings.json",
+            ),
+        )]);
+
+        assert_eq!(aggregated.kind, ClaudeSetupStatusKind::AlreadyConfigured);
+        assert_eq!(aggregated.message, "already");
+    }
+
+    #[test]
+    fn extracts_credentials_with_expiry_from_credentials_json() {
+        let raw = r#"{"claudeAiOauth":{"accessToken":"token-123","expiresAt":1765000000000}}"#;
+
+        let credentials = extract_credentials(raw).expect("credentials should parse");
+
+        assert_eq!(credentials.access_token, "token-123");
+        assert_eq!(credentials.expires_at_ms, Some(1765000000000));
+        assert!(extract_credentials(r#"{"claudeAiOauth":{"accessToken":"  "}}"#).is_none());
+        assert!(extract_credentials("not json").is_none());
+    }
+
+    #[test]
+    fn treats_past_expiry_as_expired_and_missing_expiry_as_valid() {
+        let expired = OauthCredentials {
+            access_token: "token".into(),
+            expires_at_ms: Some(1),
+        };
+        let no_expiry = OauthCredentials {
+            access_token: "token".into(),
+            expires_at_ms: None,
+        };
+        let future = OauthCredentials {
+            access_token: "token".into(),
+            expires_at_ms: Some(u64::MAX),
+        };
+
+        assert!(credentials_expired(&expired));
+        assert!(!credentials_expired(&no_expiry));
+        assert!(!credentials_expired(&future));
+    }
+
+    #[test]
+    fn reports_no_active_login_for_config_dir_without_credentials() {
+        let temp_dir = unique_test_dir("usage-no-login");
+        let config_dir = temp_dir.join(".claude-empty");
+        fs::create_dir_all(&config_dir).expect("config dir should be created");
+
+        let payload = fetch_claude_usage_for(config_dir, temp_dir.clone());
+
+        assert_eq!(payload.config_dir_label, "~/.claude-empty");
+        assert!(payload.usage.is_none());
+        let error = payload.error.expect("payload should carry an error");
+        assert_eq!(error.kind, "no_active_login");
+        assert_eq!(error.message, no_active_login_message("~/.claude-empty"));
     }
 }

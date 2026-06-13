@@ -307,10 +307,74 @@ body {
 .usage-panel {
   width: 104px;
   box-sizing: border-box;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  margin: 12px 0 4px;
+}
+
+.usage-panel__dials {
+  width: 100%;
   display: flex;
   justify-content: space-around;
   align-items: flex-start;
-  margin: 12px 0 4px;
+}
+
+.usage-panel__profile {
+  max-width: 104px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: "Consolas", "SF Mono", "Menlo", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: rgba(247, 250, 252, 0.95);
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+.usage-panel__error {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.usage-panel__error-title {
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  color: #ff7a18;
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+.usage-panel__error-detail {
+  font-size: 7px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(247, 250, 252, 0.95);
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.95);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .usage-dial {
