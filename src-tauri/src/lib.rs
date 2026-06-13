@@ -2,6 +2,17 @@ mod claude_settings;
 mod profiles;
 mod runtime_paths;
 
+#[cfg(target_os = "windows")]
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmSetWindowAttribute(
+        hwnd: *mut core::ffi::c_void,
+        dw_attribute: u32,
+        pv_attribute: *const core::ffi::c_void,
+        cb_attribute: u32,
+    ) -> i32;
+}
+
 use std::{
     env, fs,
     io::ErrorKind,
@@ -929,6 +940,22 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(hwnd) = window.hwnd() {
+                    const DWMWA_BORDER_COLOR: u32 = 34;
+                    const DWMWA_COLOR_NONE: u32 = 0xFFFFFFFE;
+                    unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd.0,
+                            DWMWA_BORDER_COLOR,
+                            &DWMWA_COLOR_NONE as *const u32 as *const core::ffi::c_void,
+                            core::mem::size_of::<u32>() as u32,
+                        );
+                    }
+                }
+            }
 
             Ok(())
         })

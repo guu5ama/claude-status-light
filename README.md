@@ -28,6 +28,15 @@ Current scope:
 - **Hooks everywhere** — automatic hook setup now installs the bridge into every discovered config path, so sessions from any of them drive the light.
 - **Fixed bundled bridge resolution** — installed builds now find the bridge under `Resources/_up_/bridge` (previously they silently fell back to a dev path, breaking hook setup on machines without the repo).
 
+## What's New in 0.2.3
+
+Windows-focused fixes:
+
+- **No more border halo on Windows** — calls `DwmSetWindowAttribute(DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE)` on startup to remove the Windows 11 system-drawn border highlight around the transparent window.
+- **Transparent background** — explicitly sets `background: transparent` on the root HTML element so WebView2 never renders a white backdrop before CSS loads.
+
+macOS behavior is unchanged.
+
 ## What's New in 0.2.2
 
 macOS-focused fixes:
@@ -60,7 +69,6 @@ Releases: [github.com/guu5ama/claude-status-light/releases](https://github.com/g
 
 Current release assets:
 
-- Windows installer: `.exe`
 - Windows installer: `.msi`
 - Windows portable: `.zip`
 - macOS test build: unsigned `aarch64 .dmg`
